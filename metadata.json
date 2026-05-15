@@ -1,0 +1,5 @@
+{
+  "name": "ChainPay: Stripe-Powered Crypto Gateway",
+  "description": "A modern dashboard for buying crypto with Stripe and monitoring blockchain transactions.",
+  "requestFramePermissions": []
+}
