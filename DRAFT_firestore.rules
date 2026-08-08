@@ -1,0 +1,138 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- HELPER FUNCTIONS ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // Entity Validation Helpers
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'email'])
+        && data.uid is string && data.uid.size() > 0 && data.uid.size() <= 128
+        && data.email is string && data.email.size() > 0 && data.email.size() <= 128;
+    }
+
+    function isValidBlock(data) {
+      return data.keys().hasAll(['height', 'hash', 'timestamp'])
+        && data.height is number
+        && data.hash is string && data.hash.size() <= 128
+        && data.timestamp is string && data.timestamp.size() <= 64;
+    }
+
+    function isValidTransaction(data) {
+      return data.keys().hasAll(['hash', 'sender', 'receiver', 'amount', 'timestamp'])
+        && data.hash is string && data.hash.size() <= 128
+        && data.sender is string && data.sender.size() <= 128
+        && data.receiver is string && data.receiver.size() <= 128
+        && data.amount is string && data.amount.size() <= 64
+        && data.timestamp is string && data.timestamp.size() <= 64;
+    }
+
+    function isValidWallet(data) {
+      return data.keys().hasAll(['address', 'balance'])
+        && data.address is string && data.address.size() <= 128
+        && data.balance is number;
+    }
+
+    function isValidProposal(data) {
+      return data.keys().hasAll(['title', 'description', 'cost', 'votes'])
+        && data.title is string && data.title.size() > 0 && data.title.size() <= 128
+        && data.description is string && data.description.size() <= 1000
+        && data.cost is number && data.cost >= 0
+        && data.votes is number && data.votes >= 0;
+    }
+
+    function isValidSubscription(data) {
+      return data.keys().hasAll(['customer_id', 'plan_id', 'status'])
+        && data.customer_id is string && data.customer_id.size() <= 128
+        && data.plan_id is string && data.plan_id.size() <= 64
+        && data.status is string && data.status.size() <= 32;
+    }
+
+    function isValidContract(data) {
+      return data.keys().hasAll(['address', 'name', 'contract_type'])
+        && data.address is string && data.address.size() <= 128
+        && data.name is string && data.name.size() <= 128
+        && data.contract_type is string && data.contract_type.size() <= 64;
+    }
+
+    // --- COLLECTION RULES ---
+
+    // Users Collection
+    match /users/{userId} {
+      allow get: if isOwner(userId);
+      allow list: if isSignedIn() && resource.data.uid == request.auth.uid;
+      allow create: if isOwner(userId) && isValidUser(incoming());
+      allow update: if isOwner(userId) && isValidUser(incoming());
+      allow delete: if isOwner(userId);
+    }
+
+    // Blocks Collection
+    match /blocks/{blockId} {
+      allow read: if true;
+      allow create, update: if isSignedIn() && isValidId(blockId) && isValidBlock(incoming());
+      allow delete: if false;
+    }
+
+    // Transactions Collection
+    match /transactions/{txHash} {
+      allow read: if true;
+      allow create: if isSignedIn() && isValidId(txHash) && isValidTransaction(incoming());
+      allow update, delete: if false;
+    }
+
+    // Wallets Collection
+    match /wallets/{address} {
+      allow read: if true;
+      allow create, update: if isSignedIn() && isValidId(address) && isValidWallet(incoming());
+      allow delete: if false;
+    }
+
+    // Proposals Collection
+    match /proposals/{proposalId} {
+      allow read: if true;
+      allow create: if isSignedIn() && isValidId(proposalId) && isValidProposal(incoming());
+      allow update: if isSignedIn() && isValidId(proposalId) && isValidProposal(incoming());
+      allow delete: if false;
+    }
+
+    // Subscriptions Collection
+    match /subscriptions/{subscriptionId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && isValidId(subscriptionId) && isValidSubscription(incoming());
+      allow delete: if false;
+    }
+
+    // Contracts Collection
+    match /contracts/{contractAddress} {
+      allow read: if true;
+      allow create: if isSignedIn() && isValidId(contractAddress) && isValidContract(incoming());
+      allow update: if isSignedIn() && isValidId(contractAddress) && isValidContract(incoming());
+      allow delete: if false;
+    }
+  }
+}

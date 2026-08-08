@@ -1,5 +1,6 @@
 {
   "name": "ChainPay: Stripe-Powered Crypto Gateway",
-  "description": "A modern dashboard for buying crypto with Stripe and monitoring blockchain transactions.",
-  "requestFramePermissions": []
+  "description": "A modern dashboard for buying crypto, deploying EVM smart contracts, and managing token economy ledgers with Stripe integration.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

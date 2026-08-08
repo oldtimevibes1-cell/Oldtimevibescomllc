@@ -1,0 +1,141 @@
+{
+  "entities": {
+    "Block": {
+      "title": "Block",
+      "description": "Blockchain block summary",
+      "type": "object",
+      "properties": {
+        "height": { "type": "number", "description": "Block height index" },
+        "hash": { "type": "string", "maxLength": 128, "description": "Block hash" },
+        "timestamp": { "type": "string", "maxLength": 64, "description": "ISO timestamp" },
+        "transactions_count": { "type": "number", "description": "Number of transactions" },
+        "miner": { "type": "string", "maxLength": 128, "description": "Miner address" },
+        "size": { "type": "string", "maxLength": 32, "description": "Block size string" },
+        "gas_used": { "type": "string", "maxLength": 32, "description": "Gas used string" }
+      },
+      "required": ["height", "hash", "timestamp"]
+    },
+    "Transaction": {
+      "title": "Transaction",
+      "description": "Blockchain transaction record",
+      "type": "object",
+      "properties": {
+        "hash": { "type": "string", "maxLength": 128, "description": "Transaction hash" },
+        "block_height": { "type": "number", "description": "Parent block height" },
+        "timestamp": { "type": "string", "maxLength": 64, "description": "ISO timestamp" },
+        "sender": { "type": "string", "maxLength": 128, "description": "Sender address" },
+        "receiver": { "type": "string", "maxLength": 128, "description": "Receiver address" },
+        "amount": { "type": "string", "maxLength": 64, "description": "Amount transferred" },
+        "asset": { "type": "string", "maxLength": 32, "description": "Asset code (e.g. USD, VIBE, ETH)" },
+        "fee": { "type": "string", "maxLength": 32, "description": "Transaction fee" },
+        "status": { "type": "string", "maxLength": 32, "description": "Status e.g. Success, Pending" },
+        "type": { "type": "string", "maxLength": 32, "description": "Type of transaction" },
+        "additional_info": { "type": "string", "maxLength": 256, "description": "Metadata/notes" }
+      },
+      "required": ["hash", "sender", "receiver", "amount", "timestamp"]
+    },
+    "Wallet": {
+      "title": "Wallet",
+      "description": "User VIBE token wallet",
+      "type": "object",
+      "properties": {
+        "address": { "type": "string", "maxLength": 128, "description": "Wallet public address" },
+        "label": { "type": "string", "maxLength": 64, "description": "Label/Owner name" },
+        "balance": { "type": "number", "description": "Token balance" },
+        "userId": { "type": "string", "maxLength": 128, "description": "Owner Auth UID" }
+      },
+      "required": ["address", "balance"]
+    },
+    "Proposal": {
+      "title": "Proposal",
+      "description": "Governance proposal for VIBE DAO",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "maxLength": 128, "description": "Proposal title" },
+        "description": { "type": "string", "maxLength": 1000, "description": "Detailed proposal pitch" },
+        "cost": { "type": "number", "description": "VIBE budget required" },
+        "votes": { "type": "number", "description": "Total vote count" },
+        "category": { "type": "string", "maxLength": 64, "description": "Governance category" },
+        "creatorId": { "type": "string", "maxLength": 128, "description": "Author UID" }
+      },
+      "required": ["title", "description", "cost", "votes"]
+    },
+    "Subscription": {
+      "title": "Subscription",
+      "description": "Pass subscription record",
+      "type": "object",
+      "properties": {
+        "customer_id": { "type": "string", "maxLength": 128, "description": "Stripe/Customer ID" },
+        "plan_id": { "type": "string", "maxLength": 64, "description": "Plan ID" },
+        "plan_name": { "type": "string", "maxLength": 64, "description": "Plan Name" },
+        "amount": { "type": "number", "description": "Plan cost" },
+        "interval": { "type": "string", "maxLength": 32, "description": "Billing interval" },
+        "status": { "type": "string", "maxLength": 32, "description": "Status e.g. active" },
+        "current_period_end": { "type": "string", "maxLength": 64, "description": "Period end" },
+        "created_at": { "type": "string", "maxLength": 64, "description": "Creation time" },
+        "userId": { "type": "string", "maxLength": 128, "description": "Owner UID" }
+      },
+      "required": ["customer_id", "plan_id", "status"]
+    },
+    "Contract": {
+      "title": "Contract",
+      "description": "EVM Smart contract definition & state",
+      "type": "object",
+      "properties": {
+        "address": { "type": "string", "maxLength": 128, "description": "Contract address" },
+        "name": { "type": "string", "maxLength": 128, "description": "Contract name" },
+        "contract_type": { "type": "string", "maxLength": 64, "description": "Category e.g. Escrow" },
+        "source_code": { "type": "string", "maxLength": 5000, "description": "Solidity code" },
+        "abi": { "type": "string", "maxLength": 5000, "description": "Contract ABI stringified" },
+        "state": { "type": "string", "maxLength": 5000, "description": "Serialized JSON state" },
+        "created_at": { "type": "string", "maxLength": 64, "description": "ISO creation time" },
+        "block_height": { "type": "number", "description": "Block height deployed" },
+        "tx_hash": { "type": "string", "maxLength": 128, "description": "Deployment transaction hash" },
+        "creator": { "type": "string", "maxLength": 128, "description": "Creator address" }
+      },
+      "required": ["address", "name", "contract_type"]
+    },
+    "User": {
+      "title": "User",
+      "description": "User profile document",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128, "description": "User UID" },
+        "email": { "type": "string", "maxLength": 128, "description": "User Email" },
+        "displayName": { "type": "string", "maxLength": 128, "description": "User Display Name" },
+        "createdAt": { "type": "string", "maxLength": 64, "description": "Account Creation Timestamp" }
+      },
+      "required": ["uid", "email"]
+    }
+  },
+  "firestore": {
+    "/blocks/{blockId}": {
+      "schema": { "$ref": "#/entities/Block" },
+      "description": "Collection of ledger blocks"
+    },
+    "/transactions/{txHash}": {
+      "schema": { "$ref": "#/entities/Transaction" },
+      "description": "Collection of ledger transactions"
+    },
+    "/wallets/{address}": {
+      "schema": { "$ref": "#/entities/Wallet" },
+      "description": "Collection of token wallets"
+    },
+    "/proposals/{proposalId}": {
+      "schema": { "$ref": "#/entities/Proposal" },
+      "description": "Collection of governance proposals"
+    },
+    "/subscriptions/{subscriptionId}": {
+      "schema": { "$ref": "#/entities/Subscription" },
+      "description": "Collection of transit/membership subscriptions"
+    },
+    "/contracts/{contractAddress}": {
+      "schema": { "$ref": "#/entities/Contract" },
+      "description": "Collection of deployed smart contracts"
+    },
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Collection of user profiles"
+    }
+  }
+}
