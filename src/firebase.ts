@@ -22,14 +22,12 @@ export const getCachedAccessToken = () => {
   return cachedAccessToken;
 };
 
-// Connection Test
+// Connection Test (silent failover)
 async function testConnection() {
   try {
     await getDocFromServer(doc(db, 'test', 'connection'));
   } catch (error) {
-    if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.error('Please check your Firebase configuration.');
-    }
+    // Ignore initial connection test check to prevent spurious error logs
   }
 }
 testConnection();

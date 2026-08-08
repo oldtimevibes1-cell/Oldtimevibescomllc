@@ -49,6 +49,8 @@ import { twMerge } from 'tailwind-merge';
 import { getMarketInsight, explainTransaction } from './services/geminiService';
 import { SmartContractsSection } from './components/SmartContractsSection';
 import { WorkspaceSection } from './components/WorkspaceSection';
+import { DcaSchedulerSection } from './components/DcaSchedulerSection';
+import { LegalSection } from './components/LegalSection';
 import { auth, googleProvider, db, handleFirestoreError, OperationType, setCachedAccessToken } from './firebase';
 import { onAuthStateChanged, signInWithPopup, signOut, User as FirebaseUser, GoogleAuthProvider } from 'firebase/auth';
 import { doc, setDoc } from 'firebase/firestore';
@@ -332,7 +334,8 @@ export default function App() {
   const [isSearching, setIsSearching] = useState(false);
 
   // VIBE Token Economy States
-  const [activeMainView, setActiveMainView] = useState<'dashboard' | 'contracts' | 'workspace'>('dashboard');
+  const [activeMainView, setActiveMainView] = useState<'dashboard' | 'contracts' | 'workspace' | 'dca' | 'legal'>('dashboard');
+  const [legalInitialTab, setLegalInitialTab] = useState<'terms' | 'privacy'>('terms');
   const [wallet, setWallet] = useState<TokenWallet | null>(null);
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [faucetAmount, setFaucetAmount] = useState('50');
@@ -748,6 +751,20 @@ export default function App() {
                 </span>
               </button>
               <button
+                onClick={() => setActiveMainView('dca')}
+                className={`px-3.5 py-1.5 rounded-xl transition-all cursor-pointer font-semibold flex items-center gap-1.5 ${
+                  activeMainView === 'dca'
+                    ? 'text-violet-300 bg-violet-500/20 border border-violet-500/30 shadow-sm shadow-violet-500/20'
+                    : 'text-white/60 hover:text-violet-300 hover:bg-white/5'
+                }`}
+              >
+                <Zap size={14} className="text-violet-400" />
+                DCA Scheduler
+                <span className="bg-violet-500/20 text-violet-300 text-[10px] px-1.5 py-0.2 rounded font-mono font-bold border border-violet-500/30">
+                  Stripe Auto
+                </span>
+              </button>
+              <button
                 onClick={() => setActiveMainView('workspace')}
                 className={`px-3.5 py-1.5 rounded-xl transition-all cursor-pointer font-semibold flex items-center gap-1.5 ${
                   activeMainView === 'workspace'
@@ -759,6 +776,23 @@ export default function App() {
                 Google Workspace
                 <span className="bg-emerald-500/20 text-emerald-300 text-[10px] px-1.5 py-0.2 rounded font-mono font-bold border border-emerald-500/30">
                   Drive/Sheets
+                </span>
+              </button>
+              <button
+                onClick={() => {
+                  setLegalInitialTab('terms');
+                  setActiveMainView('legal');
+                }}
+                className={`px-3.5 py-1.5 rounded-xl transition-all cursor-pointer font-semibold flex items-center gap-1.5 ${
+                  activeMainView === 'legal'
+                    ? 'text-indigo-300 bg-indigo-500/20 border border-indigo-500/30 shadow-sm shadow-indigo-500/20'
+                    : 'text-white/60 hover:text-indigo-300 hover:bg-white/5'
+                }`}
+              >
+                <ShieldCheck size={14} className="text-indigo-400" />
+                Legal & Compliance
+                <span className="bg-indigo-500/20 text-indigo-300 text-[10px] px-1.5 py-0.2 rounded font-mono font-bold border border-indigo-500/30">
+                  Terms/Privacy
                 </span>
               </button>
             </div>
@@ -820,6 +854,25 @@ export default function App() {
           </div>
         )}
 
+        {activeMainView === 'dca' && (
+          <div className="space-y-6">
+            <div className="flex items-center justify-between">
+              <button
+                onClick={() => setActiveMainView('dashboard')}
+                className="text-xs text-slate-400 hover:text-white flex items-center gap-1.5 bg-white/5 px-3 py-1.5 rounded-xl border border-white/10 cursor-pointer"
+              >
+                &larr; Back to Main Dashboard
+              </button>
+            </div>
+            <DcaSchedulerSection 
+              onTransactionSuccess={() => {
+                fetchLedger();
+                fetchWallet();
+              }}
+            />
+          </div>
+        )}
+
         {activeMainView === 'workspace' && (
           <div className="space-y-6">
             <div className="flex items-center justify-between">
@@ -834,6 +887,23 @@ export default function App() {
               ledger={ledger}
               stats={stats}
               authUser={authUser}
+            />
+          </div>
+        )}
+
+        {activeMainView === 'legal' && (
+          <div className="space-y-6">
+            <div className="flex items-center justify-between">
+              <button
+                onClick={() => setActiveMainView('dashboard')}
+                className="text-xs text-slate-400 hover:text-white flex items-center gap-1.5 bg-white/5 px-3 py-1.5 rounded-xl border border-white/10 cursor-pointer"
+              >
+                &larr; Back to Main Dashboard
+              </button>
+            </div>
+            <LegalSection 
+              initialTab={legalInitialTab}
+              onClose={() => setActiveMainView('dashboard')}
             />
           </div>
         )}
@@ -1630,10 +1700,44 @@ export default function App() {
             <span className="font-bold">ChainPay</span>
           </div>
           <div className="flex gap-8 text-sm text-white/40">
-            <a href="#" className="hover:text-white">Privacy Policy</a>
-            <a href="#" className="hover:text-white">Terms of Service</a>
-            <a href="#" className="hover:text-white">API Documentation</a>
-            <a href="#" className="hover:text-white">Support</a>
+            <button
+              onClick={() => {
+                setLegalInitialTab('privacy');
+                setActiveMainView('legal');
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+              className="hover:text-white cursor-pointer transition-colors"
+            >
+              Privacy Policy
+            </button>
+            <button
+              onClick={() => {
+                setLegalInitialTab('terms');
+                setActiveMainView('legal');
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+              className="hover:text-white cursor-pointer transition-colors"
+            >
+              Terms of Service
+            </button>
+            <button
+              onClick={() => {
+                setActiveMainView('contracts');
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+              className="hover:text-white cursor-pointer transition-colors"
+            >
+              EVM Smart Contracts
+            </button>
+            <button
+              onClick={() => {
+                setActiveMainView('dca');
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+              className="hover:text-white cursor-pointer transition-colors"
+            >
+              Stripe DCA
+            </button>
           </div>
           <div className="text-white/20 text-xs">
             © 2026 ChainPay Technologies Inc. All app components are patient pending IP of Oldtimevibescomllc.

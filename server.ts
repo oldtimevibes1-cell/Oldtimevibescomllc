@@ -89,6 +89,19 @@ db.exec(`
     tx_hash TEXT,
     creator TEXT
   );
+
+  CREATE TABLE IF NOT EXISTS dca_schedules (
+    id TEXT PRIMARY KEY,
+    asset TEXT,
+    amount REAL,
+    frequency TEXT,
+    payment_method TEXT,
+    status TEXT,
+    next_execution TEXT,
+    total_invested REAL,
+    total_crypto_bought REAL,
+    created_at TEXT
+  );
 `);
 
 // Prefill default database data if empty
@@ -414,6 +427,53 @@ contract TreasuryMultisig {
     19283746,
     "0x789ghipayout1234567890abcdef1234567890abcdef1234567890abcdef1234",
     "0xCounty_Treasury_Contract"
+  );
+}
+
+const dcaCount = db.prepare("SELECT COUNT(*) as count FROM dca_schedules").get() as { count: number };
+if (dcaCount.count === 0) {
+  const insertDca = db.prepare(`
+    INSERT INTO dca_schedules (id, asset, amount, frequency, payment_method, status, next_execution, total_invested, total_crypto_bought, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  insertDca.run(
+    "dca_btc_weekly",
+    "BTC",
+    50.00,
+    "Weekly",
+    "Stripe Card (•••• 4242)",
+    "active",
+    new Date(Date.now() + 2 * 24 * 3600 * 1000).toISOString(),
+    600.00,
+    0.00921,
+    new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString()
+  );
+
+  insertDca.run(
+    "dca_vibe_daily",
+    "VIBE",
+    25.00,
+    "Daily",
+    "Stripe Card (•••• 4242)",
+    "active",
+    new Date(Date.now() + 18 * 3600 * 1000).toISOString(),
+    350.00,
+    3500.00,
+    new Date(Date.now() - 14 * 24 * 3600 * 1000).toISOString()
+  );
+
+  insertDca.run(
+    "dca_eth_monthly",
+    "ETH",
+    100.00,
+    "Monthly",
+    "Stripe Direct Debit",
+    "active",
+    new Date(Date.now() + 12 * 24 * 3600 * 1000).toISOString(),
+    1200.00,
+    0.421,
+    new Date(Date.now() - 90 * 24 * 3600 * 1000).toISOString()
   );
 }
 
@@ -1098,6 +1158,160 @@ async function startServer() {
         tx_hash: txHash,
         block_height: nextHeight
       });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // --- DCA SCHEDULER API ROUTES ---
+
+  // Get all DCA schedules
+  app.get("/api/dca/schedules", (req, res) => {
+    try {
+      const rows = db.prepare("SELECT * FROM dca_schedules ORDER BY created_at DESC").all();
+      res.json(rows);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Create a new DCA schedule
+  app.post("/api/dca/schedules", (req, res) => {
+    try {
+      const { asset, amount, frequency, payment_method } = req.body;
+      const parsedAmount = parseFloat(amount);
+      if (!asset || isNaN(parsedAmount) || parsedAmount <= 0 || !frequency) {
+        return res.status(400).json({ error: "Invalid asset, amount, or frequency" });
+      }
+
+      const id = "dca_" + crypto.randomBytes(6).toString("hex");
+      const createdAt = new Date().toISOString();
+      
+      // Calculate next execution date based on frequency
+      let nextDays = 1;
+      if (frequency === "Weekly") nextDays = 7;
+      else if (frequency === "Bi-Weekly") nextDays = 14;
+      else if (frequency === "Monthly") nextDays = 30;
+
+      const nextExecution = new Date(Date.now() + nextDays * 24 * 3600 * 1000).toISOString();
+      const pm = payment_method || "Stripe Card (•••• 4242)";
+
+      db.prepare(`
+        INSERT INTO dca_schedules (id, asset, amount, frequency, payment_method, status, next_execution, total_invested, total_crypto_bought, created_at)
+        VALUES (?, ?, ?, ?, ?, 'active', ?, 0, 0, ?)
+      `).run(id, asset, parsedAmount, frequency, pm, nextExecution, createdAt);
+
+      // Award bonus loyalty VIBE for setting up automated DCA!
+      processStripePaymentReward(parsedAmount, "DCA_Plan_Created", `Created ${frequency} DCA for ${asset}`);
+
+      const newRow = db.prepare("SELECT * FROM dca_schedules WHERE id = ?").get(id);
+      res.json(newRow);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Toggle DCA schedule status (active <-> paused)
+  app.patch("/api/dca/schedules/:id/toggle", (req, res) => {
+    try {
+      const { id } = req.params;
+      const row = db.prepare("SELECT * FROM dca_schedules WHERE id = ?").get(id) as any;
+      if (!row) {
+        return res.status(404).json({ error: "DCA schedule not found" });
+      }
+
+      const newStatus = row.status === "active" ? "paused" : "active";
+      db.prepare("UPDATE dca_schedules SET status = ? WHERE id = ?").run(newStatus, id);
+
+      const updatedRow = db.prepare("SELECT * FROM dca_schedules WHERE id = ?").get(id);
+      res.json(updatedRow);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Execute DCA purchase immediately
+  app.post("/api/dca/schedules/:id/execute", (req, res) => {
+    try {
+      const { id } = req.params;
+      const row = db.prepare("SELECT * FROM dca_schedules WHERE id = ?").get(id) as any;
+      if (!row) {
+        return res.status(404).json({ error: "DCA schedule not found" });
+      }
+
+      // Calculate crypto bought estimation
+      let price = 1;
+      if (row.asset === "ETH") price = 2850;
+      else if (row.asset === "BTC") price = 65000;
+      else if (row.asset === "SOL") price = 145;
+      else if (row.asset === "VIBE") price = 0.10;
+
+      const cryptoAmount = row.amount / price;
+      const newTotalInvested = row.total_invested + row.amount;
+      const newTotalCrypto = row.total_crypto_bought + cryptoAmount;
+
+      // Update next execution
+      let nextDays = 1;
+      if (row.frequency === "Weekly") nextDays = 7;
+      else if (row.frequency === "Bi-Weekly") nextDays = 14;
+      else if (row.frequency === "Monthly") nextDays = 30;
+
+      const nextExecution = new Date(Date.now() + nextDays * 24 * 3600 * 1000).toISOString();
+
+      db.prepare(`
+        UPDATE dca_schedules 
+        SET total_invested = ?, total_crypto_bought = ?, next_execution = ?
+        WHERE id = ?
+      `).run(newTotalInvested, newTotalCrypto, nextExecution, id);
+
+      // Record transaction
+      const latestHeightRow = db.prepare("SELECT MAX(height) as max_height FROM blocks").get() as { max_height: number };
+      const nextHeight = (latestHeightRow?.max_height || 19283746) + 1;
+      const nextHash = "0x" + crypto.createHash('sha256').update(nextHeight.toString() + Date.now().toString()).digest('hex');
+
+      const userWallet = db.prepare("SELECT * FROM wallets WHERE address LIKE '0x0VibeUser%'").get() as any;
+
+      db.prepare(`
+        INSERT INTO blocks (height, hash, timestamp, transactions_count, miner, size, gas_used)
+        VALUES (?, ?, ?, 1, ?, '0.5 KB', '24,800')
+      `).run(nextHeight, nextHash, new Date().toISOString(), userWallet.address);
+
+      const txHash = "0x" + crypto.createHash('sha256').update(nextHash + "dca_exec").digest('hex');
+      db.prepare(`
+        INSERT INTO transactions (hash, block_height, timestamp, sender, receiver, amount, asset, fee, status, type, additional_info)
+        VALUES (?, ?, ?, ?, ?, ?, ?, '0.0001 ETH', 'Success', 'buy', ?)
+      `).run(
+        txHash, 
+        nextHeight, 
+        new Date().toISOString(), 
+        row.payment_method || 'Stripe Card (•••• 4242)', 
+        userWallet.address, 
+        cryptoAmount.toFixed(4), 
+        row.asset, 
+        `Automated DCA Recurring Purchase ($${row.amount})`
+      );
+
+      // Reward bonus VIBE
+      processStripePaymentReward(row.amount, "DCA_Execution_Reward", `Automated DCA Executed for ${row.asset}`);
+
+      const updatedRow = db.prepare("SELECT * FROM dca_schedules WHERE id = ?").get(id);
+      res.json({
+        schedule: updatedRow,
+        tx_hash: txHash,
+        amount_spent: row.amount,
+        crypto_acquired: cryptoAmount
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Delete DCA Schedule
+  app.delete("/api/dca/schedules/:id", (req, res) => {
+    try {
+      const { id } = req.params;
+      db.prepare("DELETE FROM dca_schedules WHERE id = ?").run(id);
+      res.json({ success: true, id });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
