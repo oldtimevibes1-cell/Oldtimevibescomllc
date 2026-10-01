@@ -3,6 +3,7 @@
   "appId": "1:634891886839:web:34f77cdd36b79d12cdb3f2",
   "apiKey": "AIzaSyAZeYEcRKBgrEhrMf8P2_UXkGv8DbDAb-g",
   "authDomain": "genxnext.firebaseapp.com",
+  "firestoreDatabaseId": "ai-studio-chainpaystripepo-4a0ebe39-62f0-44f5-9a9f-9968f32f21b8",
   "storageBucket": "genxnext.firebasestorage.app",
   "messagingSenderId": "634891886839",
   "measurementId": "",

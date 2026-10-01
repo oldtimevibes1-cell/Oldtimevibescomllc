@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Wallet, 
   ArrowUpRight, 
@@ -12,36 +12,39 @@ import {
   CreditCard, 
   TrendingUp, 
   ShieldCheck, 
-  Activity,
-  ChevronRight,
-  ExternalLink,
-  Coins,
-  Search,
-  Box,
-  Hash,
-  Clock,
-  User,
-  ArrowRight,
-  X,
-  MessageSquare,
-  Sparkles,
-  Bot,
-  Send,
-  Vote,
-  Ticket,
-  Flame,
-  Key,
-  Award,
-  Download,
-  CheckCircle2,
-  Calendar,
-  BadgeCheck,
-  AlertTriangle,
-  Zap,
-  Check,
-  FileCode,
-  Layers,
-  Cpu
+  Activity, 
+  ChevronRight, 
+  ExternalLink, 
+  Coins, 
+  Search, 
+  Box, 
+  Hash, 
+  Clock, 
+  User, 
+  ArrowRight, 
+  X, 
+  MessageSquare, 
+  Sparkles, 
+  Bot, 
+  Send, 
+  Vote, 
+  Ticket, 
+  Flame, 
+  Key, 
+  Award, 
+  Download, 
+  CheckCircle2, 
+  Calendar, 
+  BadgeCheck, 
+  AlertTriangle, 
+  Zap, 
+  Check, 
+  FileCode, 
+  Layers, 
+  Cpu,
+  Bell,
+  Volume2,
+  VolumeX
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { clsx, type ClassValue } from 'clsx';
@@ -51,6 +54,7 @@ import { SmartContractsSection } from './components/SmartContractsSection';
 import { WorkspaceSection } from './components/WorkspaceSection';
 import { DcaSchedulerSection } from './components/DcaSchedulerSection';
 import { LegalSection } from './components/LegalSection';
+import { ToastNotificationSystem, type ToastItem, playToastChime } from './components/ToastNotificationSystem';
 import { auth, googleProvider, db, handleFirestoreError, OperationType, setCachedAccessToken } from './firebase';
 import { onAuthStateChanged, signInWithPopup, signOut, User as FirebaseUser, GoogleAuthProvider } from 'firebase/auth';
 import { doc, setDoc } from 'firebase/firestore';
@@ -275,6 +279,11 @@ const ExplorerDetail = ({ data, onClose }: { data: any, onClose: () => void }) =
   );
 };
 
+// LocalStorage Preference Keys
+const STORAGE_KEY_SOUND_ENABLED = 'chainpay_pref_sound_enabled';
+const STORAGE_KEY_POLLING_INTERVAL = 'chainpay_pref_polling_interval_ms';
+const STORAGE_KEY_POLLING_ACTIVE = 'chainpay_pref_polling_active';
+
 export default function App() {
   const [loading, setLoading] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<'stripe' | 'coinbase'>('stripe');
@@ -367,59 +376,327 @@ export default function App() {
   const [chatInput, setChatInput] = useState('');
   const [chatMessages, setChatMessages] = useState<{role: 'user' | 'ai', text: string}[]>([]);
 
-  // Fetch functions
-  const fetchStats = () => {
-    fetch('/api/blockchain/stats')
-      .then(res => res.json())
-      .then(data => {
-        setStats(data);
-        generateMarketInsight(data);
-      })
-      .catch(err => console.error('Failed to fetch stats', err));
-  };
+  // Real-Time Toast Notifications State with localStorage persistence
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const [toastHistory, setToastHistory] = useState<ToastItem[]>([]);
 
-  const fetchLedger = () => {
-    fetch('/api/blockchain/ledger')
-      .then(res => res.json())
-      .then(data => setLedger(data))
-      .catch(err => console.error('Failed to fetch ledger', err));
-  };
+  const [soundEnabled, setSoundEnabled] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_SOUND_ENABLED);
+      return saved !== null ? JSON.parse(saved) : true;
+    } catch {
+      return true;
+    }
+  });
 
-  const fetchWallet = () => {
-    fetch('/api/token/wallet')
-      .then(res => res.json())
-      .then(data => setWallet(data))
-      .catch(err => console.error('Failed to fetch token wallet', err));
-  };
+  const [pollingIntervalMs, setPollingIntervalMs] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_POLLING_INTERVAL);
+      if (saved !== null) {
+        const val = parseInt(saved, 10);
+        if (!isNaN(val) && val >= 1000 && val <= 60000) return val;
+      }
+      return 3500;
+    } catch {
+      return 3500;
+    }
+  });
 
-  const fetchProposals = () => {
-    fetch('/api/token/proposals')
-      .then(res => res.json())
-      .then(data => setProposals(data))
-      .catch(err => console.error('Failed to fetch proposals', err));
-  };
+  const [isPollingActive, setIsPollingActive] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_POLLING_ACTIVE);
+      return saved !== null ? JSON.parse(saved) : true;
+    } catch {
+      return true;
+    }
+  });
 
-  const fetchStripeConfig = () => {
-    fetch('/api/stripe/config')
-      .then(res => res.json())
-      .then(data => setStripeConfig(data))
-      .catch(err => console.error('Failed to fetch stripe config', err));
-  };
+  const [isSimulating, setIsSimulating] = useState(false);
 
-  const fetchActiveSubscriptions = () => {
-    fetch('/api/subscriptions/active')
-      .then(res => res.json())
-      .then(data => setActiveSubscriptions(data))
-      .catch(err => console.error('Failed to fetch active subscriptions', err));
-  };
+  // Sync preferences to localStorage on change
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY_SOUND_ENABLED, JSON.stringify(soundEnabled));
+    } catch (e) {
+      console.warn('Failed to save sound preference to localStorage:', e);
+    }
+  }, [soundEnabled]);
 
   useEffect(() => {
-    fetchStats();
-    fetchLedger();
-    fetchWallet();
-    fetchProposals();
-    fetchStripeConfig();
-    fetchActiveSubscriptions();
+    try {
+      localStorage.setItem(STORAGE_KEY_POLLING_INTERVAL, pollingIntervalMs.toString());
+    } catch (e) {
+      console.warn('Failed to save polling interval preference to localStorage:', e);
+    }
+  }, [pollingIntervalMs]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY_POLLING_ACTIVE, JSON.stringify(isPollingActive));
+    } catch (e) {
+      console.warn('Failed to save polling active preference to localStorage:', e);
+    }
+  }, [isPollingActive]);
+
+  // Synchronize preferences across browser tabs in real-time
+  useEffect(() => {
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === STORAGE_KEY_SOUND_ENABLED && e.newValue !== null) {
+        try { setSoundEnabled(JSON.parse(e.newValue)); } catch {}
+      } else if (e.key === STORAGE_KEY_POLLING_INTERVAL && e.newValue !== null) {
+        try {
+          const val = parseInt(e.newValue, 10);
+          if (!isNaN(val)) setPollingIntervalMs(val);
+        } catch {}
+      } else if (e.key === STORAGE_KEY_POLLING_ACTIVE && e.newValue !== null) {
+        try { setIsPollingActive(JSON.parse(e.newValue)); } catch {}
+      }
+    };
+
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
+  }, []);
+
+  const seenTxHashesRef = useRef<Set<string>>(new Set());
+  const lastSeenBlockHeightRef = useRef<number | null>(null);
+  const isInitialLedgerLoadRef = useRef<boolean>(true);
+
+  const addToast = (toastItem: ToastItem) => {
+    if (soundEnabled) {
+      playToastChime(toastItem.type === 'block');
+    }
+    // Limit to max 4 visible toasts on screen simultaneously
+    setToasts((prev) => [toastItem, ...prev.slice(0, 3)]);
+    setToastHistory((prev) => [toastItem, ...prev.slice(0, 99)]);
+  };
+
+  const handleDismissToast = (id: string) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  };
+
+  // Fetch functions with real-time diff detection
+  const fetchStats = async () => {
+    try {
+      const res = await fetch('/api/blockchain/stats');
+      if (!res.ok) return;
+      const data = await res.json();
+      setStats(data);
+      generateMarketInsight(data);
+    } catch {
+      // Gracefully ignore transient poll errors
+    }
+  };
+
+  const fetchLedger = async () => {
+    try {
+      const res = await fetch('/api/blockchain/ledger');
+      if (!res.ok) return;
+      const data = await res.json();
+      if (!Array.isArray(data)) return;
+      setLedger(data);
+
+      if (isInitialLedgerLoadRef.current) {
+        // Record all existing items initially without firing alerts
+        data.forEach((tx: any) => {
+          const key = tx.rawHash || tx.id;
+          if (key) seenTxHashesRef.current.add(key);
+        });
+      } else {
+        // Find new transactions that were not in the seen set
+        const newTxs: any[] = [];
+        data.forEach((tx: any) => {
+          const key = tx.rawHash || tx.id;
+          if (key && !seenTxHashesRef.current.has(key)) {
+            seenTxHashesRef.current.add(key);
+            newTxs.push(tx);
+          }
+        });
+
+        // Trigger real-time toast alert for each newly added transaction
+        newTxs.forEach((tx: any) => {
+          const isMint = tx.type?.includes('Mint');
+          const isBurn = tx.type?.includes('Burn');
+          const isDeploy = tx.type?.includes('Deploy');
+          const isCall = tx.type?.includes('Call');
+
+          const title = isMint 
+            ? `🪙 VIBE Minted: ${tx.amount}`
+            : isBurn 
+            ? `🔥 VIBE Burned: ${tx.amount}`
+            : isDeploy
+            ? `📜 Smart Contract Deployed`
+            : isCall
+            ? `⚙️ Smart Contract Execution`
+            : `⚡ New Ledger Tx: ${tx.amount}`;
+
+          const message = tx.additionalInfo 
+            ? `${tx.additionalInfo} (from ${tx.from} to ${tx.to})`
+            : `Verified ${tx.type || 'Transaction'} on-chain at block #${tx.blockHeight || 'Pending'}.`;
+
+          addToast({
+            id: `tx_${tx.rawHash || tx.id}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+            type: 'transaction',
+            title,
+            message,
+            timestamp: Date.now(),
+            details: {
+              hash: tx.hash,
+              rawHash: tx.rawHash || tx.id,
+              blockHeight: tx.blockHeight,
+              amount: tx.amount,
+              from: tx.from,
+              to: tx.to,
+              txType: tx.type,
+              fee: tx.fee,
+              info: tx.additionalInfo
+            },
+            data: {
+              type: 'transaction',
+              id: (tx.rawHash || tx.id).substring(0, 12),
+              hash: tx.rawHash || tx.id,
+              blockHeight: tx.blockHeight || 19283746,
+              timestamp: tx.timestamp || new Date().toISOString(),
+              sender: tx.from,
+              receiver: tx.to,
+              amount: tx.amount,
+              fee: tx.fee || '0.0001 ETH',
+              status: tx.status === 'verified' ? 'Success' : tx.status
+            }
+          });
+        });
+      }
+    } catch {
+      // Gracefully ignore transient poll errors
+    }
+  };
+
+  const fetchBlocks = async () => {
+    try {
+      const res = await fetch('/api/blockchain/blocks');
+      if (!res.ok) return;
+      const blocksData = await res.json();
+      if (!Array.isArray(blocksData) || blocksData.length === 0) return;
+
+      const latest = blocksData[0];
+      if (lastSeenBlockHeightRef.current === null) {
+        lastSeenBlockHeightRef.current = latest.height;
+      } else if (latest.height > lastSeenBlockHeightRef.current) {
+        const newHeight = latest.height;
+        lastSeenBlockHeightRef.current = newHeight;
+
+        // Trigger real-time toast alert for newly added/mined block!
+        addToast({
+          id: `block_${newHeight}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+          type: 'block',
+          title: `Block #${newHeight} Appended to Ledger`,
+          message: `New block sealed with ${latest.transactions_count} transaction(s). Miner: ${latest.miner.substring(0, 14)}... Gas: ${latest.gas_used}`,
+          timestamp: Date.now(),
+          details: {
+            blockHeight: newHeight,
+            hash: latest.hash.substring(0, 18) + '...',
+            rawHash: latest.hash,
+            miner: latest.miner,
+            size: latest.size,
+            info: `${latest.transactions_count} transactions`
+          },
+          data: {
+            type: 'block',
+            id: newHeight.toString(),
+            height: newHeight,
+            hash: latest.hash,
+            timestamp: latest.timestamp,
+            transactions: latest.transactions_count,
+            miner: latest.miner,
+            size: latest.size,
+            gasUsed: latest.gas_used
+          }
+        });
+      }
+    } catch {
+      // Gracefully ignore transient poll errors
+    }
+  };
+
+  const fetchWallet = async () => {
+    try {
+      const res = await fetch('/api/token/wallet');
+      if (!res.ok) return;
+      const data = await res.json();
+      setWallet(data);
+    } catch {
+      // Gracefully ignore transient poll errors
+    }
+  };
+
+  const fetchProposals = async () => {
+    try {
+      const res = await fetch('/api/token/proposals');
+      if (!res.ok) return;
+      const data = await res.json();
+      setProposals(data);
+    } catch {
+      // Gracefully ignore transient poll errors
+    }
+  };
+
+  const fetchStripeConfig = async () => {
+    try {
+      const res = await fetch('/api/stripe/config');
+      if (!res.ok) return;
+      const data = await res.json();
+      setStripeConfig(data);
+    } catch {
+      // Gracefully ignore transient poll errors
+    }
+  };
+
+  const fetchActiveSubscriptions = async () => {
+    try {
+      const res = await fetch('/api/subscriptions/active');
+      if (!res.ok) return;
+      const data = await res.json();
+      setActiveSubscriptions(data);
+    } catch {
+      // Gracefully ignore transient poll errors
+    }
+  };
+
+  // Simulate a live transit transaction and mine a new block
+  const handleSimulateEvent = async () => {
+    setIsSimulating(true);
+    try {
+      const res = await fetch('/api/blockchain/simulate', { method: 'POST' });
+      const data = await res.json();
+      if (data.status === 'success') {
+        // Immediately run fetches to update state and trigger real-time toasts
+        await Promise.all([fetchLedger(), fetchBlocks(), fetchStats(), fetchWallet()]);
+      }
+    } catch (err) {
+      console.error('Failed to simulate network event:', err);
+    } finally {
+      setIsSimulating(false);
+    }
+  };
+
+  // Initial load and URL query param check
+  useEffect(() => {
+    const initData = async () => {
+      await Promise.all([
+        fetchStats(),
+        fetchLedger(),
+        fetchBlocks(),
+        fetchWallet(),
+        fetchProposals(),
+        fetchStripeConfig(),
+        fetchActiveSubscriptions()
+      ]);
+      // End initial load after first data population
+      setTimeout(() => {
+        isInitialLedgerLoadRef.current = false;
+      }, 500);
+    };
+
+    initData();
 
     const urlParams = new URLSearchParams(window.location.search);
     if (urlParams.get('success') === 'true') {
@@ -431,6 +708,20 @@ export default function App() {
       window.history.replaceState({}, document.title, window.location.pathname);
     }
   }, []);
+
+  // Real-time polling interval
+  useEffect(() => {
+    if (!isPollingActive) return;
+
+    const intervalId = setInterval(() => {
+      fetchLedger();
+      fetchBlocks();
+      fetchStats();
+      fetchWallet();
+    }, pollingIntervalMs);
+
+    return () => clearInterval(intervalId);
+  }, [isPollingActive, pollingIntervalMs]);
 
   const handleStripeCheckout = async (
     mode: 'payment' | 'subscription',
@@ -552,6 +843,7 @@ export default function App() {
       setTimeout(() => {
         fetchWallet();
         fetchLedger();
+        fetchBlocks();
         fetchStats();
       }, 1500);
     }
@@ -570,6 +862,7 @@ export default function App() {
       if (data.status === 'success') {
         fetchWallet();
         fetchLedger();
+        fetchBlocks();
         fetchStats();
         alert(`MINED & MINTED: Successfully claimed ${faucetAmount} VIBE from Developer Faucet! \nNew Block Height: #${data.block_height}\nTx Hash: ${data.tx_hash}`);
       } else {
@@ -601,6 +894,7 @@ export default function App() {
       if (data.status === 'success') {
         fetchWallet();
         fetchLedger();
+        fetchBlocks();
         fetchStats();
         setTransferTarget('');
         alert(`SECURE P2P TRANSFER COMPLETED: Sent ${transferAmount} VIBE to ${transferTarget}!\nRecorded on Block: #${data.block_height}`);
@@ -632,6 +926,7 @@ export default function App() {
       if (data.status === 'success') {
         fetchWallet();
         fetchLedger();
+        fetchBlocks();
         fetchStats();
         if (utility === 'ticket') setTicketActive(true);
         if (utility === 'rebate') setRebateActive(true);
@@ -664,6 +959,7 @@ export default function App() {
       if (data.status === 'success') {
         fetchWallet();
         fetchLedger();
+        fetchBlocks();
         fetchStats();
         fetchProposals();
         alert(`GOVERNANCE VOTE CONFIRMED: Destroyed ${cost} VIBE to sign ballot for: "${data.proposal_title}"!\nNew live tally: ${data.votes} votes`);
@@ -798,7 +1094,12 @@ export default function App() {
             </div>
             <div className="flex items-center gap-2 bg-indigo-950/45 border border-indigo-500/30 px-3.5 py-1.5 rounded-full text-xs font-bold text-indigo-300">
               <div className="w-2.5 h-2.5 bg-emerald-400 rounded-full animate-ping" />
-              <span>Economy Engine Connected</span>
+              <span className="hidden sm:inline">Live Ledger Feed</span>
+              {toastHistory.length > 0 && (
+                <span className="bg-indigo-600 text-white text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold">
+                  {toastHistory.length}
+                </span>
+              )}
             </div>
 
             {/* Firebase Auth Header Status */}
@@ -848,7 +1149,11 @@ export default function App() {
               </button>
             </div>
             <SmartContractsSection 
-              onRefreshLedger={fetchLedger}
+              onRefreshLedger={() => {
+                fetchLedger();
+                fetchBlocks();
+                fetchStats();
+              }}
               onRefreshWallet={fetchWallet}
             />
           </div>
@@ -867,6 +1172,8 @@ export default function App() {
             <DcaSchedulerSection 
               onTransactionSuccess={() => {
                 fetchLedger();
+                fetchBlocks();
+                fetchStats();
                 fetchWallet();
               }}
             />
@@ -1045,7 +1352,7 @@ export default function App() {
                     <p className="text-sm font-bold text-emerald-400">{stats?.total_verified_volume || "$0"}</p>
                   </div>
                   <button 
-                    onClick={() => { fetchLedger(); fetchStats(); }} 
+                    onClick={() => { fetchLedger(); fetchBlocks(); fetchStats(); }} 
                     className="bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 px-3 py-1.5 rounded-full text-[10px] font-bold border border-emerald-500/20 flex items-center gap-1.5 active:scale-95 transition-all cursor-pointer"
                   >
                     <RefreshCcw size={10} />
@@ -1079,7 +1386,11 @@ export default function App() {
 
             {/* Smart Contracts Studio Section */}
             <SmartContractsSection 
-              onRefreshLedger={fetchLedger}
+              onRefreshLedger={() => {
+                fetchLedger();
+                fetchBlocks();
+                fetchStats();
+              }}
               onRefreshWallet={fetchWallet}
             />
 
@@ -1691,6 +2002,23 @@ export default function App() {
           <MessageSquare className="group-hover:scale-110 transition-transform" />
         </button>
       </div>
+
+      {/* Real-Time Toast Notification System */}
+      <ToastNotificationSystem
+        toasts={toasts}
+        history={toastHistory}
+        soundEnabled={soundEnabled}
+        onToggleSound={() => setSoundEnabled(prev => !prev)}
+        onDismissToast={handleDismissToast}
+        onClearHistory={() => setToastHistory([])}
+        onInspectItem={(data) => setSearchResult(data)}
+        onSimulateEvent={handleSimulateEvent}
+        isSimulating={isSimulating}
+        pollingIntervalMs={pollingIntervalMs}
+        onSetPollingInterval={setPollingIntervalMs}
+        isPollingActive={isPollingActive}
+        onTogglePolling={() => setIsPollingActive(prev => !prev)}
+      />
 
       {/* Footer */}
       <footer className="border-t border-white/5 py-12 mt-12">

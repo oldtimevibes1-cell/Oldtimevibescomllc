@@ -11,7 +11,7 @@ const { Client, resources } = coinbaseCommerce;
 
 dotenv.config();
 
-const PORT = 3000;
+const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
 // Initialize SQLite database
 const db = new Database("chainpay.db");
@@ -480,6 +480,17 @@ if (dcaCount.count === 0) {
 async function startServer() {
   const app = express();
 
+  // Enable CORS headers for iframe environment
+  app.use((req, res, next) => {
+    res.header("Access-Control-Allow-Origin", "*");
+    res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, PATCH, OPTIONS");
+    res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization");
+    if (req.method === "OPTIONS") {
+      return res.sendStatus(200);
+    }
+    next();
+  });
+
   // Lazy Stripe initialization
   let stripeClient: Stripe | null = null;
   function getStripe() {
@@ -881,7 +892,7 @@ async function startServer() {
   app.get("/api/blockchain/ledger", (req, res) => {
     try {
       const rows = db.prepare(`
-        SELECT hash as id, sender as 'from', receiver as 'to', amount, asset, type, hash, status 
+        SELECT hash as id, sender as 'from', receiver as 'to', amount, asset, type, hash, status, block_height, timestamp, fee, additional_info 
         FROM transactions 
         ORDER BY timestamp DESC
         LIMIT 50
@@ -892,12 +903,82 @@ async function startServer() {
         from: row.from,
         to: row.to,
         amount: `${row.amount} ${row.asset}`,
-        type: row.type === 'buy' ? 'Bus Fare' : row.type === 'mint' ? 'VIBE Mint' : row.type === 'burn' ? 'VIBE Burn' : 'Transfer',
+        type: row.type === 'buy' ? 'Bus Fare' : row.type === 'mint' ? 'VIBE Mint' : row.type === 'burn' ? 'VIBE Burn' : row.type === 'contract_deploy' ? 'Contract Deploy' : row.type === 'contract_call' ? 'Contract Call' : 'Transfer',
         hash: row.hash.substring(0, 18) + "...",
-        status: row.status === 'Success' ? 'verified' : 'pending'
+        rawHash: row.hash,
+        blockHeight: row.block_height,
+        status: row.status === 'Success' ? 'verified' : 'pending',
+        timestamp: row.timestamp,
+        fee: row.fee,
+        additionalInfo: row.additional_info
       }));
 
       res.json(formatted);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Dynamic Blocks API
+  app.get("/api/blockchain/blocks", (req, res) => {
+    try {
+      const rows = db.prepare(`
+        SELECT height, hash, timestamp, transactions_count, miner, size, gas_used
+        FROM blocks
+        ORDER BY height DESC
+        LIMIT 25
+      `).all() as any[];
+      res.json(rows);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Simulate an on-chain event / real-time transit transaction & block
+  app.post("/api/blockchain/simulate", (req, res) => {
+    try {
+      const sampleEvents = [
+        { type: "buy", sender: "Metro_NFC_Validator_#12", receiver: "County_Treasury", amount: "2.75", asset: "USD", fee: "0.0001 ETH", info: "Tap-and-Go Subway Fare on Line 3" },
+        { type: "buy", sender: "Stripe_Card_...9182", receiver: "County_Treasury", amount: "5.50", asset: "USD", fee: "0.0001 ETH", info: "Dual Bus Pass Route #42 Express" },
+        { type: "mint", sender: "Transit_Loyalty_Oracle", receiver: "0x0VibeUser99723bc44d5378309ee2abf1539bf71de1b7", amount: "25", asset: "VIBE", fee: "0.0 VIBE", info: "Off-Peak Commuter Carbon Offset Bonus" },
+        { type: "burn", sender: "0x0VibeUser99723bc44d5378309ee2abf1539bf71de1b7", receiver: "0x0000000000000000000000000000000000000000", amount: "15", asset: "VIBE", fee: "0.0 VIBE", info: "Smart Shelter Wi-Fi & Charge Voucher" },
+        { type: "transfer", sender: "0xCounty_Treasury_Contract", receiver: "Solar_Shelter_Node_#7", amount: "40", asset: "VIBE", fee: "0.02 VIBE", info: "Municipal IoT Node Micro-Settlement" }
+      ];
+
+      const selected = sampleEvents[Math.floor(Math.random() * sampleEvents.length)];
+
+      const latestHeightRow = db.prepare("SELECT MAX(height) as max_height FROM blocks").get() as { max_height: number };
+      const nextHeight = (latestHeightRow?.max_height || 19283746) + 1;
+      const nextHash = "0x" + crypto.createHash('sha256').update(nextHeight.toString() + Date.now().toString()).digest('hex');
+
+      const userWallet = db.prepare("SELECT * FROM wallets WHERE address LIKE '0x0VibeUser%'").get() as any;
+      const miner = userWallet?.address || "0xCounty_Treasury_Contract";
+
+      db.prepare(`
+        INSERT INTO blocks (height, hash, timestamp, transactions_count, miner, size, gas_used)
+        VALUES (?, ?, ?, 1, ?, '0.7 KB', '48,900')
+      `).run(nextHeight, nextHash, new Date().toISOString(), miner);
+
+      const txHash = "0x" + crypto.createHash('sha256').update(nextHash + Date.now().toString()).digest('hex');
+      db.prepare(`
+        INSERT INTO transactions (hash, block_height, timestamp, sender, receiver, amount, asset, fee, status, type, additional_info)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Success', ?, ?)
+      `).run(txHash, nextHeight, new Date().toISOString(), selected.sender, selected.receiver, selected.amount, selected.asset, selected.fee, selected.type, selected.info);
+
+      res.json({
+        status: "success",
+        block_height: nextHeight,
+        block_hash: nextHash,
+        tx_hash: txHash,
+        transaction: {
+          hash: txHash,
+          amount: `${selected.amount} ${selected.asset}`,
+          type: selected.type,
+          sender: selected.sender,
+          receiver: selected.receiver,
+          info: selected.info
+        }
+      });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
