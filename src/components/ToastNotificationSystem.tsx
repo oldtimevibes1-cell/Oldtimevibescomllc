@@ -19,7 +19,8 @@ import {
   Sparkles,
   ChevronRight,
   ShieldCheck,
-  Settings2
+  Settings2,
+  Mail
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -251,6 +252,7 @@ export interface ToastNotificationSystemProps {
   onSetPollingInterval?: (ms: number) => void;
   isPollingActive?: boolean;
   onTogglePolling?: () => void;
+  onOpenEmailNotificationSettings?: () => void;
 }
 
 export const ToastNotificationSystem: React.FC<ToastNotificationSystemProps> = ({
@@ -266,7 +268,8 @@ export const ToastNotificationSystem: React.FC<ToastNotificationSystemProps> = (
   pollingIntervalMs = 3500,
   onSetPollingInterval,
   isPollingActive = true,
-  onTogglePolling
+  onTogglePolling,
+  onOpenEmailNotificationSettings
 }) => {
   const [showDrawer, setShowDrawer] = useState(false);
   const [filter, setFilter] = useState<'all' | 'blocks' | 'transactions'>('all');
@@ -463,6 +466,22 @@ export const ToastNotificationSystem: React.FC<ToastNotificationSystemProps> = (
                     </span>
                   </button>
                 </div>
+
+                {/* Email Notifications Cloud Functions Button */}
+                {onOpenEmailNotificationSettings && (
+                  <button
+                    onClick={onOpenEmailNotificationSettings}
+                    className="w-full mt-2 py-2 px-3 rounded-xl bg-gradient-to-r from-indigo-900/30 to-cyan-900/30 hover:from-indigo-900/50 hover:to-cyan-900/50 border border-cyan-500/30 text-cyan-200 text-xs font-semibold flex items-center justify-between transition-all cursor-pointer shadow-sm group"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Mail size={14} className="text-cyan-400 group-hover:scale-110 transition-transform" />
+                      <span>Email Alerts (Firebase Cloud Functions)</span>
+                    </div>
+                    <span className="text-[10px] bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 px-2 py-0.5 rounded font-mono font-bold">
+                      Configure &rarr;
+                    </span>
+                  </button>
+                )}
               </div>
 
               {/* Controls bar inside Drawer */}

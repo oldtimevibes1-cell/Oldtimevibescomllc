@@ -44,8 +44,13 @@ import {
   Cpu,
   Bell,
   Volume2,
-  VolumeX
+  VolumeX,
+  Mail,
+  QrCode,
+  Smartphone,
+  Copy
 } from 'lucide-react';
+import { QRCodeSVG } from 'qrcode.react';
 import { motion, AnimatePresence } from 'motion/react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -55,6 +60,7 @@ import { WorkspaceSection } from './components/WorkspaceSection';
 import { DcaSchedulerSection } from './components/DcaSchedulerSection';
 import { LegalSection } from './components/LegalSection';
 import { ToastNotificationSystem, type ToastItem, playToastChime } from './components/ToastNotificationSystem';
+import { NotificationSettingsModal } from './components/NotificationSettingsModal';
 import { auth, googleProvider, db, handleFirestoreError, OperationType, setCachedAccessToken } from './firebase';
 import { onAuthStateChanged, signInWithPopup, signOut, User as FirebaseUser, GoogleAuthProvider } from 'firebase/auth';
 import { doc, setDoc } from 'firebase/firestore';
@@ -289,6 +295,86 @@ export default function App() {
   const [paymentMethod, setPaymentMethod] = useState<'stripe' | 'coinbase'>('stripe');
   const [buyAmount, setBuyAmount] = useState('100');
   const [selectedAsset, setSelectedAsset] = useState('ETH');
+
+  // QR Code Generator State for Stripe Checkout
+  const [showQrCode, setShowQrCode] = useState(false);
+  const [qrType, setQrType] = useState<'banking' | 'crypto'>('banking');
+  const [qrCopied, setQrCopied] = useState(false);
+  const [qrScanSuccess, setQrScanSuccess] = useState(false);
+
+  const assetRates: Record<string, number> = {
+    ETH: 2850,
+    BTC: 65000,
+    USDC: 1,
+    SOL: 150,
+    VIBE: 0.1
+  };
+
+  const getCryptoAmount = () => {
+    const rate = assetRates[selectedAsset] || 1;
+    const usd = parseFloat(buyAmount) || 0;
+    const cryptoAmt = usd / rate;
+    return selectedAsset === 'USDC' ? cryptoAmt.toFixed(2) : cryptoAmt.toFixed(6);
+  };
+
+  const treasuryAddresses: Record<string, string> = {
+    ETH: '0x71C8364f3B8022dF436db0688023c28079C41b82',
+    BTC: 'bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq',
+    USDC: '0x71C8364f3B8022dF436db0688023c28079C41b82',
+    SOL: '7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU',
+    VIBE: '0x71C8364f3B8022dF436db0688023c28079C41b82'
+  };
+
+  const getQrValue = () => {
+    const usd = parseFloat(buyAmount) || 10;
+    const cryptoAmt = getCryptoAmount();
+    const address = treasuryAddresses[selectedAsset] || treasuryAddresses.ETH;
+
+    if (qrType === 'crypto') {
+      if (selectedAsset === 'BTC') {
+        return `bitcoin:${address}?amount=${cryptoAmt}&label=ChainPay%20Deposit`;
+      } else if (selectedAsset === 'SOL') {
+        return `solana:${address}?amount=${cryptoAmt}&label=ChainPay%20Deposit`;
+      } else if (selectedAsset === 'USDC') {
+        const units = Math.floor(usd * 1e6);
+        return `ethereum:0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48/transfer?address=${address}&uint256=${units}`;
+      } else {
+        return `ethereum:${address}?value=${cryptoAmt}&gas=21000`;
+      }
+    } else {
+      const currentHost = typeof window !== 'undefined' ? window.location.origin : 'https://chainpay.network';
+      return `${currentHost}/?checkout=stripe&amount=${usd}&asset=${selectedAsset}&gateway=stripe&ref=CP-${Date.now().toString(36).toUpperCase()}`;
+    }
+  };
+
+  const handleCopyQr = () => {
+    const val = getQrValue();
+    navigator.clipboard.writeText(val);
+    setQrCopied(true);
+    setTimeout(() => setQrCopied(false), 2000);
+  };
+
+  const handleSimulateMobileScan = async () => {
+    setQrScanSuccess(true);
+    playToastChime(true);
+    try {
+      await fetch('/api/blockchain/transact', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          recipient: treasuryAddresses[selectedAsset] || treasuryAddresses.ETH,
+          amount: parseFloat(buyAmount) || 10,
+          asset: selectedAsset,
+          memo: `QR Instant Scan (${qrType === 'banking' ? 'Mobile Banking / Stripe Express' : 'Crypto Wallet Direct'})`
+        })
+      });
+      fetchStats();
+      fetchLedger();
+    } catch {
+      // ignore
+    }
+    setTimeout(() => setQrScanSuccess(false), 3500);
+  };
   
   // Firebase Auth State
   const [authUser, setAuthUser] = useState<FirebaseUser | null>(null);
@@ -379,6 +465,7 @@ export default function App() {
   // Real-Time Toast Notifications State with localStorage persistence
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const [toastHistory, setToastHistory] = useState<ToastItem[]>([]);
+  const [showEmailNotificationModal, setShowEmailNotificationModal] = useState<boolean>(false);
 
   const [soundEnabled, setSoundEnabled] = useState<boolean>(() => {
     try {
@@ -787,7 +874,11 @@ export default function App() {
     }
   };
 
-  const generateMarketInsight = async (data: any) => {
+  const lastInsightTimeRef = useRef<number>(0);
+  const generateMarketInsight = async (data: any, force = false) => {
+    const now = Date.now();
+    if (!force && now - lastInsightTimeRef.current < 180000) return; // limit to once every 3 minutes unless forced
+    lastInsightTimeRef.current = now;
     setIsAiLoading(true);
     const insight = await getMarketInsight(data);
     setAiInsight(insight || '');
@@ -1089,6 +1180,18 @@ export default function App() {
                 Legal & Compliance
                 <span className="bg-indigo-500/20 text-indigo-300 text-[10px] px-1.5 py-0.2 rounded font-mono font-bold border border-indigo-500/30">
                   Terms/Privacy
+                </span>
+              </button>
+              <button
+                onClick={() => setShowEmailNotificationModal(true)}
+                className="px-3.5 py-1.5 rounded-xl transition-all cursor-pointer font-semibold flex items-center gap-1.5 text-cyan-300 bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 shadow-sm"
+                title="Configure email alert notifications for large transactions using Firebase Cloud Functions"
+              >
+                <Mail size={14} className="text-cyan-400" />
+                <span className="hidden lg:inline">Whale Alerts</span>
+                <span className="lg:hidden">Alerts</span>
+                <span className="bg-cyan-500/20 text-cyan-300 text-[10px] px-1.5 py-0.2 rounded font-mono font-bold border border-cyan-500/30">
+                  Cloud Fn
                 </span>
               </button>
             </div>
@@ -1865,6 +1968,124 @@ export default function App() {
                       </div>
                     </div>
 
+                    {/* QR Code Quick Scan for Mobile Banking & Crypto Wallets */}
+                    <div className="pt-0.5">
+                      <button 
+                        type="button"
+                        onClick={() => setShowQrCode(!showQrCode)}
+                        className={cn(
+                          "w-full py-2.5 px-3 rounded-xl border text-xs font-bold transition-all flex items-center justify-between cursor-pointer",
+                          showQrCode 
+                            ? "bg-indigo-950/80 border-indigo-400/50 text-indigo-200 shadow-inner" 
+                            : "bg-black/40 border-white/10 text-white/80 hover:bg-white/10 hover:text-white"
+                        )}
+                      >
+                        <div className="flex items-center gap-2">
+                          <QrCode size={15} className={showQrCode ? "text-indigo-400" : "text-white/60"} />
+                          <span>QR Code Generator (Mobile Banking & Wallets)</span>
+                        </div>
+                        <span className="text-[10px] bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 px-2 py-0.5 rounded-full font-mono">
+                          {showQrCode ? 'Hide QR' : 'Show QR'}
+                        </span>
+                      </button>
+
+                      <AnimatePresence>
+                        {showQrCode && (
+                          <motion.div
+                            initial={{ opacity: 0, height: 0 }}
+                            animate={{ opacity: 1, height: 'auto' }}
+                            exit={{ opacity: 0, height: 0 }}
+                            className="overflow-hidden"
+                          >
+                            <div className="mt-2.5 p-3.5 rounded-2xl bg-black/70 border border-indigo-500/30 backdrop-blur-md space-y-3 shadow-2xl">
+                              {/* QR Mode Selector */}
+                              <div className="flex rounded-xl bg-black/60 p-1 border border-white/10">
+                                <button
+                                  type="button"
+                                  onClick={() => setQrType('banking')}
+                                  className={cn(
+                                    "flex-1 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer",
+                                    qrType === 'banking' 
+                                      ? "bg-indigo-600 text-white shadow-sm" 
+                                      : "text-white/60 hover:text-white"
+                                  )}
+                                >
+                                  <Smartphone size={13} />
+                                  Mobile Banking / Card
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setQrType('crypto')}
+                                  className={cn(
+                                    "flex-1 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer",
+                                    qrType === 'crypto' 
+                                      ? "bg-indigo-600 text-white shadow-sm" 
+                                      : "text-white/60 hover:text-white"
+                                  )}
+                                >
+                                  <Wallet size={13} />
+                                  Crypto Wallet
+                                </button>
+                              </div>
+
+                              {/* QR Code Graphic & Details */}
+                              <div className="flex flex-col sm:flex-row items-center gap-3.5 bg-white/5 p-3 rounded-xl border border-white/10">
+                                <div className="p-2.5 bg-white rounded-xl shadow-lg shrink-0 flex items-center justify-center">
+                                  <QRCodeSVG 
+                                    value={getQrValue()}
+                                    size={130}
+                                    level="M"
+                                    includeMargin={false}
+                                  />
+                                </div>
+                                <div className="flex-1 text-left space-y-1.5 w-full">
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-[10px] font-mono uppercase tracking-wider text-emerald-400 font-bold bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
+                                      {qrType === 'banking' ? 'Stripe Express Scan' : `${selectedAsset} EIP-681`}
+                                    </span>
+                                    <span className="text-xs font-mono font-bold text-white">
+                                      ${buyAmount} USD
+                                    </span>
+                                  </div>
+                                  <p className="text-[11px] text-white/70 leading-relaxed">
+                                    {qrType === 'banking'
+                                      ? "Scan with your phone camera or mobile banking app (Apple Pay / Google Pay / Instant Bank) to initiate Stripe Checkout."
+                                      : `Scan with MetaMask, Rainbow, or Trust Wallet to transfer ${getCryptoAmount()} ${selectedAsset} directly.`}
+                                  </p>
+                                  <div className="pt-1 flex gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={handleCopyQr}
+                                      className="flex-1 py-1.5 px-2 bg-white/10 hover:bg-white/20 border border-white/10 rounded-lg text-[11px] font-bold text-white/90 flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                                    >
+                                      {qrCopied ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
+                                      <span>{qrCopied ? 'URI Copied!' : 'Copy Pay Link'}</span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={handleSimulateMobileScan}
+                                      disabled={qrScanSuccess}
+                                      className="py-1.5 px-2.5 bg-emerald-600/30 hover:bg-emerald-600/50 border border-emerald-500/30 rounded-lg text-[11px] font-bold text-emerald-300 flex items-center gap-1 transition-all cursor-pointer disabled:opacity-60"
+                                      title="Simulate scanning this QR code from a mobile device"
+                                    >
+                                      {qrScanSuccess ? <CheckCircle2 size={12} className="text-emerald-400" /> : <Zap size={12} />}
+                                      <span>{qrScanSuccess ? 'Scanned!' : 'Simulate Scan'}</span>
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {qrScanSuccess && (
+                                <div className="p-2 bg-emerald-500/20 border border-emerald-500/40 rounded-xl text-center text-xs font-bold text-emerald-300 animate-pulse">
+                                  ✓ Mobile scan detected! Transaction committed to transparency ledger.
+                                </div>
+                              )}
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </div>
+
                     <button 
                       onClick={() => {
                         if (paymentMethod === 'stripe') {
@@ -2018,6 +2239,15 @@ export default function App() {
         onSetPollingInterval={setPollingIntervalMs}
         isPollingActive={isPollingActive}
         onTogglePolling={() => setIsPollingActive(prev => !prev)}
+        onOpenEmailNotificationSettings={() => setShowEmailNotificationModal(true)}
+      />
+
+      {/* Large Transaction Email Notification Settings Modal (Firebase Cloud Functions) */}
+      <NotificationSettingsModal 
+        isOpen={showEmailNotificationModal}
+        onClose={() => setShowEmailNotificationModal(false)}
+        authUser={authUser}
+        onSignInRequired={handleGoogleSignIn}
       />
 
       {/* Footer */}

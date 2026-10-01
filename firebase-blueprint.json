@@ -106,9 +106,29 @@
         "createdAt": { "type": "string", "maxLength": 64, "description": "Account Creation Timestamp" }
       },
       "required": ["uid", "email"]
+    },
+    "NotificationSubscription": {
+      "title": "NotificationSubscription",
+      "description": "User email alert subscription for large transactions via Cloud Functions",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "maxLength": 128, "description": "Subscriber Auth UID" },
+        "email": { "type": "string", "maxLength": 128, "description": "Alert recipient email address" },
+        "minThresholdUsd": { "type": "number", "description": "Minimum transaction USD value triggering alert" },
+        "enabled": { "type": "boolean", "description": "Subscription active flag" },
+        "alertTypes": { "type": "array", "description": "Selected alert categories" },
+        "digestFrequency": { "type": "string", "maxLength": 32, "description": "Notification delivery cadence (instant, hourly, daily)" },
+        "updatedAt": { "type": "string", "maxLength": 64, "description": "Last updated ISO timestamp" },
+        "createdAt": { "type": "string", "maxLength": 64, "description": "Created ISO timestamp" }
+      },
+      "required": ["userId", "email", "minThresholdUsd", "enabled"]
     }
   },
   "firestore": {
+    "/notification_subscriptions/{userId}": {
+      "schema": { "$ref": "#/entities/NotificationSubscription" },
+      "description": "User alert subscription settings for large transactions"
+    },
     "/blocks/{blockId}": {
       "schema": { "$ref": "#/entities/Block" },
       "description": "Collection of ledger blocks"

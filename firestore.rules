@@ -80,7 +80,24 @@ service cloud.firestore {
         && data.contract_type is string && data.contract_type.size() <= 64;
     }
 
+    function isValidNotificationSubscription(data) {
+      return data.keys().hasAll(['userId', 'email', 'minThresholdUsd', 'enabled'])
+        && data.userId is string && data.userId.size() > 0 && data.userId.size() <= 128
+        && data.email is string && data.email.size() > 0 && data.email.size() <= 128
+        && data.minThresholdUsd is number && data.minThresholdUsd >= 0
+        && data.enabled is bool;
+    }
+
     // --- COLLECTION RULES ---
+
+    // Notification Subscriptions (Large Transaction Alerts via Cloud Functions)
+    match /notification_subscriptions/{userId} {
+      allow get: if isOwner(userId);
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isOwner(userId) && isValidId(userId) && isValidNotificationSubscription(incoming());
+      allow update: if isOwner(userId) && isValidId(userId) && isValidNotificationSubscription(incoming());
+      allow delete: if isOwner(userId);
+    }
 
     // Users Collection
     match /users/{userId} {

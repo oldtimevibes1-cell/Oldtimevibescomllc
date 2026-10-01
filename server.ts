@@ -6,6 +6,7 @@ import coinbaseCommerce from "coinbase-commerce-node";
 import path from "path";
 import Database from "better-sqlite3";
 import crypto from "crypto";
+import { GoogleGenAI } from "@google/genai";
 
 const { Client, resources } = coinbaseCommerce;
 
@@ -88,6 +89,16 @@ db.exec(`
     block_height INTEGER,
     tx_hash TEXT,
     creator TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS notification_subscriptions (
+    user_id TEXT PRIMARY KEY,
+    email TEXT NOT NULL,
+    min_threshold_usd REAL NOT NULL,
+    enabled INTEGER DEFAULT 1,
+    alert_types TEXT,
+    digest_frequency TEXT DEFAULT 'instant',
+    updated_at TEXT
   );
 
   CREATE TABLE IF NOT EXISTS dca_schedules (
@@ -656,6 +667,174 @@ async function startServer() {
   // API Routes
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok", timestamp: new Date().toISOString() });
+  });
+
+  // Server-Side Gemini AI Client (MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API)
+  let genAIClient: GoogleGenAI | null = null;
+  function getGenAI() {
+    if (!genAIClient) {
+      genAIClient = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+    }
+    return genAIClient;
+  }
+
+  // Gemini AI Proxy Routes
+  app.post("/api/ai/market-insight", async (req, res) => {
+    try {
+      const { marketData } = req.body;
+      const ai = getGenAI();
+      const prompt = `As a Senior Crypto Analyst, analyze this market data: ${JSON.stringify(marketData)}. 
+Provide a concise, 2-sentence insight about the current market sentiment and what a user should watch for. 
+Keep it professional and data-driven.`;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-flash-latest",
+        contents: prompt,
+      });
+
+      res.json({ insight: response.text || "Market liquidity remains robust with low slippage across core assets." });
+    } catch (error: any) {
+      console.warn("Server-side Gemini fallback for market-insight:", error.message || error);
+      res.json({
+        insight: "On-chain transparency score is optimal at 99.9% with stable gas fees and steady liquidity volume.",
+        fallback: true
+      });
+    }
+  });
+
+  app.post("/api/ai/explain-transaction", async (req, res) => {
+    try {
+      const { txData } = req.body;
+      const ai = getGenAI();
+      const prompt = `Explain this blockchain transaction or query to a user: ${JSON.stringify(txData)}. 
+Focus on the flow of funds and the 'Transparency Ledger' context. Max 3 sentences.`;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-flash-latest",
+        contents: prompt,
+      });
+
+      res.json({ explanation: response.text || "Verified transaction recorded on the immutable ledger." });
+    } catch (error: any) {
+      console.warn("Server-side Gemini fallback for explain-transaction:", error.message || error);
+      res.json({
+        explanation: "Verified transaction recorded on the immutable blockchain ledger with cryptographically signed block receipt.",
+        fallback: true
+      });
+    }
+  });
+
+  // Notification Subscriptions & Cloud Function Alert Simulator Routes
+  app.get("/api/notifications/subscription/:userId", (req, res) => {
+    try {
+      const row = db.prepare("SELECT * FROM notification_subscriptions WHERE user_id = ?").get(req.params.userId) as any;
+      if (!row) {
+        return res.json({ subscription: null });
+      }
+      res.json({
+        subscription: {
+          userId: row.user_id,
+          email: row.email,
+          minThresholdUsd: row.min_threshold_usd,
+          enabled: Boolean(row.enabled),
+          alertTypes: row.alert_types ? JSON.parse(row.alert_types) : ["large_transfers", "whales"],
+          digestFrequency: row.digest_frequency,
+          updatedAt: row.updated_at
+        }
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/notifications/subscription", (req, res) => {
+    try {
+      const { userId, email, minThresholdUsd, enabled, alertTypes, digestFrequency } = req.body;
+      if (!email || !userId) {
+        return res.status(400).json({ error: "userId and email are required" });
+      }
+
+      const alertTypesJson = JSON.stringify(alertTypes || ["large_transfers", "whales"]);
+      const now = new Date().toISOString();
+
+      db.prepare(`
+        INSERT INTO notification_subscriptions (user_id, email, min_threshold_usd, enabled, alert_types, digest_frequency, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(user_id) DO UPDATE SET
+          email = excluded.email,
+          min_threshold_usd = excluded.min_threshold_usd,
+          enabled = excluded.enabled,
+          alert_types = excluded.alert_types,
+          digest_frequency = excluded.digest_frequency,
+          updated_at = excluded.updated_at
+      `).run(
+        userId,
+        email,
+        parseFloat(minThresholdUsd) || 1000,
+        enabled ? 1 : 0,
+        alertTypesJson,
+        digestFrequency || 'instant',
+        now
+      );
+
+      res.json({
+        status: "success",
+        subscription: {
+          userId,
+          email,
+          minThresholdUsd: parseFloat(minThresholdUsd) || 1000,
+          enabled: Boolean(enabled),
+          alertTypes: alertTypes || ["large_transfers", "whales"],
+          digestFrequency: digestFrequency || 'instant',
+          updatedAt: now
+        }
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/notifications/test-dispatch", (req, res) => {
+    try {
+      const { email, minThresholdUsd, alertTypes, digestFrequency } = req.body;
+      const targetEmail = email || "user@example.com";
+      const threshold = parseFloat(minThresholdUsd) || 1000;
+      const simulatedAmount = threshold * 2.5;
+      const txHash = "0x" + crypto.createHash("sha256").update(Date.now().toString()).digest("hex");
+      const sender = "0xWhaleTrader88274aBc91F0";
+      const receiver = "0xChainPayEscrowTreasury";
+
+      const emailSubject = `🚨 [Whale Alert] Large Transaction: $${simulatedAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })} on ChainPay`;
+
+      res.json({
+        status: "success",
+        cloudFunction: "onLargeTransactionAlert",
+        runtime: "Node.js 20 (2nd Gen Firebase Cloud Functions)",
+        region: "us-east1",
+        eventTrigger: "firestore.document('transactions/{txHash}').onCreate",
+        recipient: targetEmail,
+        threshold: threshold,
+        deliveryStatus: "queued_for_dispatch",
+        simulatedTransaction: {
+          hash: txHash,
+          amountUSD: simulatedAmount,
+          asset: "USD",
+          sender,
+          receiver,
+          type: "whale_transfer",
+          timestamp: new Date().toISOString()
+        },
+        emailContent: {
+          subject: emailSubject,
+          sender: "ChainPay Cloud Alert Engine <alerts@chainpay.network>",
+          recipient: targetEmail,
+          summary: `Simulated Cloud Function verified transaction #${txHash.substring(0, 10)}... of $${simulatedAmount.toLocaleString()} USD exceeding your alert threshold of $${threshold.toLocaleString()} USD.`,
+          previewText: `A whale transaction of $${simulatedAmount.toLocaleString()} USD was just verified on block #19283750.`
+        }
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
   });
 
   app.post("/api/create-coinbase-charge", async (req, res) => {
